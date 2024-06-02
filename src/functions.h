@@ -7,8 +7,11 @@
 #include <Adafruit_BMP280.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
+#include <SPIFlash.h>
 
 // VARS
+
+// Flashchip
 
 // Pyros
 int Pyro1 = 20;
@@ -18,11 +21,11 @@ int Pyro4 = 23;
 
 // Buzzer
 int Buzzer = 10;
-
+bool buzzerOn = false;
 
 int ttime = millis();
 // BMP280 current barometric pressure
-const float BarPressure = 1018.1;
+const float BarPressure = 1014;
 // Servo
 PWMServo servoSetOne;
 PWMServo servoSetTwo;
@@ -77,8 +80,8 @@ double CalibratedAltitude = 0;
 
 // PID
 // PID variables
-float kp = 1.0; // Proportional gain
-float ki = 0.1; // Integral gain
+float kp = 0.05; // Proportional gain
+float ki = 0.05; // Integral gain
 float kd = 0.001; // Derivative gain
 
 float setpoint = 0.0; // Desired roll rate
@@ -86,13 +89,20 @@ float previous_error = 0.0;
 float integral = 0.0;
 float derivative = 0.0;
 float output = 0.0;
+float rollRateError = 0.0;
 
 // Time variables
 unsigned long previousTime = 0;
 unsigned long currentTime;
 unsigned long parachuteFireMillisTime = 0;
 unsigned long timerMillis = 0;
+unsigned long groundTimerMillis = 0;
+
 float elapsedTime;
+
+// Parachute
+int parachutePyro = Pyro2;
+int firedParachute = 0;
 
 // Status Vars
 double firstSampleAcc = 0;
@@ -100,6 +110,45 @@ double firstSampleAlt = 0;
 
 // Status VAR
 int status = 0;
+
+void sdCardSetup() {
+    if (!SD.begin(chipSelect, SPI_HALF_SPEED)) {
+    SD.initErrorHalt();
+  }
+}
+
+void pyroSetup()
+{
+    Serial.println("Pyro 1 HIGH!");
+    tone(Buzzer, 1000);
+    digitalWrite(Pyro1, HIGH);
+    delay(1000);
+    digitalWrite(Pyro1, LOW);
+    noTone(Buzzer);
+    delay(1000);
+    Serial.println("Pyro 2 HIGH!");
+    tone(Buzzer, 3000);
+    digitalWrite(Pyro2, HIGH);
+    delay(1000);
+    digitalWrite(Pyro2, LOW);
+    noTone(Buzzer);
+    delay(1000);
+    Serial.println("Pyro 3 HIGH!");
+    tone(Buzzer, 5000);
+    digitalWrite(Pyro3, HIGH);
+    delay(1000);
+    digitalWrite(Pyro3, LOW);
+    noTone(Buzzer);
+    delay(1000);
+    Serial.println("Pyro 4 HIGH!");
+    tone(Buzzer, 7000);
+    digitalWrite(Pyro4, HIGH);
+    delay(1000);
+    digitalWrite(Pyro4, LOW);
+    noTone(Buzzer);
+    delay(1000);
+    Serial.println("All pyros completed!");
+}
 
 void getRotData()
 {
@@ -160,6 +209,7 @@ void sensorTesting()
     Serial.print(g.gyro.y);
     Serial.print(", Z: ");
     Serial.print(g.gyro.z);
+    rollRateError = g.gyro.z;
     Serial.println(" rad/s");
     Wire.beginTransmission(MPU_addr);
     Wire.write(0x3B);
@@ -214,6 +264,17 @@ void startUp() {
     status++;
     noTone(Buzzer);
 
+    // Wire
+    Wire.begin();
+    Wire.beginTransmission(MPU_addr);
+    Wire.write(0x6B);
+    Wire.write(0);
+    Wire.endTransmission(true);
+
+    // Main
+    bmp.begin();
+    mpu.begin();
+
     // Pyro Startup
     pinMode(Pyro1, OUTPUT);
     pinMode(Pyro2, OUTPUT);
@@ -223,15 +284,23 @@ void startUp() {
     // Servo Startup
     servoSetOne.attach(3);
     servoSetTwo.attach(4);
-    servoSetOneDefault = servoSetOne.read();
-    servoSetTwoDefault = servoSetTwo.read();
+    servoSetOneDefault = 90;//servoSetOne.read();
+    servoSetTwoDefault = 90;//servoSetTwo.read();
     servoSetOne.write(servoSetOneDefault);
     servoSetTwo.write(servoSetTwoDefault);
 
-    // Starting Altitude
-    startingAltitude = bmp.readAltitude(BarPressure);
     // Sensors
     sensorTesting();
+    // Starting Values
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+
+    startingAltitude = bmp.readAltitude(BarPressure);
+    firstSampleAcc = a.acceleration.y;
+    firstSampleAlt = startingAltitude;
+
+    // SD Card Startup
+    sdCardSetup();
     // Startup Finished
     delay(500);
     tone(Buzzer, 5000);
@@ -243,15 +312,16 @@ void startUp() {
 
 void fireParachute()
 {
-        Serial.println("Firing parachute now - Pyro 4");
-        digitalWrite(Pyro4, HIGH);
         if (parachuteFireMillisTime == 0)
         {
             parachuteFireMillisTime = millis();
-        }
-        if (parachuteFireMillisTime + 1000 >= millis())
+            Serial.println("Firing parachute now");
+            digitalWrite(parachutePyro, HIGH);
+        } else if (millis() >= parachuteFireMillisTime + 3000 && firedParachute == 0)
         {
-            digitalWrite(Pyro4, LOW);
+            digitalWrite(parachutePyro, LOW);
+            Serial.println("Parachute fired");
+            firedParachute = 1;
         }
 }
 
@@ -263,18 +333,20 @@ void rollControl() {
     // Read gyro data from MPU6050
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
-    float rollRate = g.gyro.z * 57.2958; // Convert raw gyro value to degrees/second
+    float rollRate = (g.gyro.z - rollRateError) * 57.2958; // Convert raw gyro value to degrees/second
 
     // Print gyro data
-    Serial.print("X: ");
+    /*Serial.print("X: ");
     Serial.print(g.gyro.x);
     Serial.print(", Y: ");
     Serial.print(g.gyro.y);
     Serial.print(", Z: ");
     Serial.print(g.gyro.z);
+    Serial.print(", Z+: ");
+    Serial.print(g.gyro.z - rollRateError);
     Serial.print(" rad/s, Roll Rate: ");
     Serial.print(rollRate);
-    Serial.println(" °/s");
+    Serial.println(" °/s");*/
 
     // PID calculations
     float error = setpoint - rollRate;
@@ -283,27 +355,102 @@ void rollControl() {
     output = kp * error + ki * integral + kd * derivative;
 
     // Constrain output to servo range
-    int servoOutputOne = constrain(output, servoSetOneDefault - maxFinAngle, servoSetOneDefault + maxFinAngle);
-    int servoOutputTwo = constrain(output, servoSetTwoDefault - maxFinAngle, servoSetTwoDefault + maxFinAngle);
+    int servoOutputOne = constrain(output + servoSetOneDefault, servoSetOneDefault - maxFinAngle, servoSetOneDefault + maxFinAngle);
+    int servoOutputTwo = constrain(output + servoSetTwoDefault, servoSetTwoDefault - maxFinAngle, servoSetTwoDefault + maxFinAngle);
 
     // Set servo positions
     servoSetOne.write(servoOutputOne);
     servoSetTwo.write(servoOutputTwo);
+    /*Serial.print("Output: ");
+    Serial.println(output);
+    Serial.print("Servo1: ");
+    Serial.println(servoOutputOne);
+    Serial.print("Servo2: ");
+    Serial.println(servoOutputTwo);
+    Serial.println("------------");*/
 
     // Update previous values for next iteration
     previous_error = error;
     previousTime = currentTime;
+    //delay(100);
 }
+
+void dataLog() {
+    bool fileExists = SD.exists("flightData.txt");
+    if (!dataFile.open("flightData.txt", O_RDWR | O_CREAT | O_AT_END)) {
+        SD.errorPrint("opening flightData.txt for write failed");
+    }
+
+    if (!fileExists) {
+        dataFile.print("Time,Acceleration_X,Acceleration_Y,Acceleration_Z,Rotation_X,Rotation_Y,Rotation_Z,Altitude,State,RollRateError,PID_Output,Servo1,Servo2,FiredParachute\n");
+    }
+
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+
+    double altitude = bmp.readAltitude(BarPressure);
+    unsigned long currentMillis = millis();
+
+    dataFile.print(currentMillis);
+    dataFile.print(",");
+    dataFile.print(a.acceleration.x);
+    dataFile.print(",");
+    dataFile.print(a.acceleration.y);
+    dataFile.print(",");
+    dataFile.print(a.acceleration.z);
+    dataFile.print(",");
+    dataFile.print(g.gyro.x);
+    dataFile.print(",");
+    dataFile.print(g.gyro.y);
+    dataFile.print(",");
+    dataFile.print(g.gyro.z);
+    dataFile.print(",");
+    dataFile.print(altitude);
+    dataFile.print(",");
+    dataFile.print(status);
+    dataFile.print(",");
+    dataFile.print(rollRateError);
+    dataFile.print(",");
+    dataFile.print(output);
+    dataFile.print(",");
+    dataFile.print(servoSetOne.read());
+    dataFile.print(",");
+    dataFile.print(servoSetTwo.read());
+    dataFile.print(",");
+    dataFile.print(firedParachute);
+    dataFile.println();
+
+    dataFile.close();
+}
+
+
 
 // State Detector
 void update() {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
+    // Ground
+    if (status == 2) {
+        if (millis() >= groundTimerMillis + 3000 || (millis() >= groundTimerMillis + 500 && buzzerOn)) {
+            if (buzzerOn) {
+                noTone(Buzzer);
+                groundTimerMillis = millis();
+                buzzerOn = false;
+            } else {
+                tone(Buzzer, 2000);
+                groundTimerMillis = millis();
+                buzzerOn = true;
+                Serial.print(millis());
+                Serial.println(" ms, all systems go");
+                dataLog();
+            }
+        }
+    }
 
     // Detect liftoff
     if (status==2) {
-        if (millis() >= timerMillis + 500) {
-            if (firstSampleAcc < a.acceleration.y) {
+        if (millis() >= timerMillis + 200) {
+            if (firstSampleAcc < a.acceleration.y - 9.81) {
                 status++;
                 Serial.println("Lift-off detected, all systems nominal");
 
@@ -311,9 +458,6 @@ void update() {
                 firstSampleAcc = a.acceleration.y;
                 timerMillis = millis();
             }
-        } else {
-            firstSampleAcc = a.acceleration.y;
-            timerMillis = millis();
         }
     } else {
         firstSampleAcc = 0;
@@ -330,14 +474,13 @@ void update() {
                 firstSampleAcc = a.acceleration.y;
                 timerMillis = millis();
             }
-        } else {
-            firstSampleAcc = a.acceleration.y;
-            timerMillis = millis() ;
         }
     }
 
     // Detect apogee
     if (status == 4) {
+        rollControl();
+
         if (millis() >= timerMillis + 200) {
             if (bmp.readAltitude(BarPressure) < firstSampleAlt) {
                 status++;
@@ -348,13 +491,24 @@ void update() {
                 firstSampleAlt = bmp.readAltitude(BarPressure);
                 timerMillis = millis();
             }
-        } else {
-            firstSampleAlt = bmp.readAltitude(BarPressure);
-            timerMillis = millis();
         }
     }
-
+    if (status == 5 || status == 6) {
+        fireParachute();
+    }
     // Detect landing (optional)
     if (status == 5) {
+        if (abs(bmp.readAltitude(BarPressure) - startingAltitude) < 10) {
+            status++;
+            Serial.println("Flight concluded, landed, all systems nominal");
+            tone(Buzzer, 2000);
+        }
+    }
+    if (status == 6) {
+         if (millis() >= groundTimerMillis + 10000) {
+            dataLog();
+            groundTimerMillis = millis();
+         }
     }
 }
+
