@@ -2,6 +2,7 @@
 
 void setup() {
   startUp();
+  launch();
 }
 
 void loop() {
