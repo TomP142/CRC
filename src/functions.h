@@ -1,13 +1,12 @@
 // Libs
 #include <Arduino.h>
 #include <Wire.h>
-#include <PWMServo.h>
+#include <ESP32Servo.h>
 #include <SPI.h>
 #include <SdFat.h>
 #include <Adafruit_BMP280.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-#include <SPIFlash.h>
 
 // VARS
 
@@ -23,14 +22,14 @@ const int adcResolution = 4095; // 12-bit ADC resolution
 // Pyros
 int Pyro1 = 2;
 // LED
-int R_LED = 4;
+int R_LED = 5;
 bool ledOn = false;
 int ttime = millis();
 // BMP280 current barometric pressure
 const float BarPressure = 1005;
 // Servo
-PWMServo servoSetOne;
-PWMServo servoSetTwo;
+Servo servoSetOne;
+Servo servoSetTwo;
 int CommandAngle = 0;
 double servoSetOneDefault = 0;
 double servoSetTwoDefault = 0;
@@ -234,8 +233,9 @@ void startUp() {
     // ADC Resolution
     analogReadResolution(12);
     // LED Startup
-    pinMode(R_LED, OUTPUT);
+    pinMode(R_LED, INPUT);
     digitalWrite(R_LED, HIGH);
+    pinMode(BMP_CS, INPUT);
 
     // Tone to announce startup
     delay(1000);
@@ -391,7 +391,7 @@ void dataLog() {
         dataFile.print(",");
         dataFile.print(servoSetTwo.read());
         dataFile.print(",");
-        dataFile.print(analogRead(analogPin) * referenceVoltage) / adcResolution);
+        dataFile.print(analogRead(analogPin) * referenceVoltage) / adcResolution;
         dataFile.print(",");
         dataFile.print(firedParachute);
         dataFile.println();
@@ -410,9 +410,8 @@ void update() {
     mpu.getEvent(&a, &g, &temp);
     // Ground
     if (status == 2) {
-        if (millis() >= groundTimerMillis + 3000 || (millis() >= groundTimerMillis + 500 && buzzerOn)) {
-            if (buzzerOn) {
-                noTone(Buzzer);
+        if (millis() >= groundTimerMillis + 3000 || (millis() >= groundTimerMillis + 500 && ledOn)) {
+            if (ledOn) {
                 digitalWrite(R_LED, LOW);
                 groundTimerMillis = millis();
                 ledOn = false;
