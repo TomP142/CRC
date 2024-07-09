@@ -15,9 +15,9 @@
 int testCount = 0;
 
 // Pyros
-int Pyro1 = 20;
+int Pyro1 = 4;
 // LED
-int R_LED = 6;
+int R_LED = 5;
 bool ledOn = false;
 int ttime = millis();
 // BMP280 current barometric pressure
@@ -32,10 +32,10 @@ double servoSetTwoDefault = 0;
 
 // BMP280
 Adafruit_BMP280 bmp;
-#define BMP_SCK (13)
-#define BMP_MISO (12)
-#define BMP_MOSI (11)
-#define BMP_CS (10)
+#define BMP_SCK (9)
+#define BMP_MISO (10)
+#define BMP_MOSI (15)
+#define BMP_CS (11)
 
 // MPU6050 IMU
 Adafruit_MPU6050 mpu;
@@ -69,7 +69,7 @@ SdFat SD;
 SdFile dataFile;
 const size_t TRANSFER_BUFFER_SIZE = 512;
 
-const int chipSelect = 0; // Change to SD card pin
+const int chipSelect = 8; // Change to SD card pin
 
 // Altitude
 double CalibratedAltitude = 0;
@@ -249,8 +249,8 @@ void startUp() {
     pinMode(Pyro1, OUTPUT);
 
     // Servo Startup
-    servoSetOne.attach(3);
-    servoSetTwo.attach(4);
+    servoSetOne.attach(20);
+    servoSetTwo.attach(21);
     servoSetOneDefault = 90;//servoSetOne.read();
     servoSetTwoDefault = 90;//servoSetTwo.read();
     servoSetOne.write(servoSetOneDefault);
