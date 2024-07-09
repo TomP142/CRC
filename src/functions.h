@@ -14,10 +14,16 @@
 // COUNT
 int testCount = 0;
 
+// Voltage
+
+const int analogPin = 34; // GPIO 34 (ADC1_CHANNEL_6)
+const float referenceVoltage = 3.3; // ESP32 ADC reference voltage
+const int adcResolution = 4095; // 12-bit ADC resolution
+
 // Pyros
-int Pyro1 = 4;
+int Pyro1 = 2;
 // LED
-int R_LED = 5;
+int R_LED = 4;
 bool ledOn = false;
 int ttime = millis();
 // BMP280 current barometric pressure
@@ -32,10 +38,10 @@ double servoSetTwoDefault = 0;
 
 // BMP280
 Adafruit_BMP280 bmp;
-#define BMP_SCK (9)
-#define BMP_MISO (10)
-#define BMP_MOSI (15)
-#define BMP_CS (11)
+#define BMP_SCK (18)
+#define BMP_MISO (19)
+#define BMP_MOSI (23)
+#define BMP_CS (21)
 
 // MPU6050 IMU
 Adafruit_MPU6050 mpu;
@@ -69,7 +75,7 @@ SdFat SD;
 SdFile dataFile;
 const size_t TRANSFER_BUFFER_SIZE = 512;
 
-const int chipSelect = 8; // Change to SD card pin
+const int chipSelect = 5; // Change to SD card pin
 
 // Altitude
 double CalibratedAltitude = 0;
@@ -225,7 +231,8 @@ void sensorTesting()
 
 void startUp() {
     Serial.begin(9600);
-    Serial.println("Test");
+    // ADC Resolution
+    analogReadResolution(12);
     // LED Startup
     pinMode(R_LED, OUTPUT);
     digitalWrite(R_LED, HIGH);
@@ -249,8 +256,8 @@ void startUp() {
     pinMode(Pyro1, OUTPUT);
 
     // Servo Startup
-    servoSetOne.attach(20);
-    servoSetTwo.attach(21);
+    servoSetOne.attach(32);
+    servoSetTwo.attach(35);
     servoSetOneDefault = 90;//servoSetOne.read();
     servoSetTwoDefault = 90;//servoSetTwo.read();
     servoSetOne.write(servoSetOneDefault);
@@ -270,7 +277,11 @@ void startUp() {
     sdCardSetup();
     // Startup Finished
     delay(500);
+    float voltage = (analogRead(analogPin) * referenceVoltage) / adcResolution;
+    Serial.print("Voltage: ");
+    Serial.println(voltage);
     digitalWrite(R_LED, LOW);
+    
 
     Serial.println("Startup completed, all systems go, waiting for launch");
     status++;
@@ -345,7 +356,7 @@ void dataLog() {
     bool fileExists = SD.exists("flightData.txt");
     if (dataFile.open("flightData.txt", O_RDWR | O_CREAT | O_AT_END)) {
         if (!fileExists) {
-            dataFile.print("Time,Acceleration_X,Acceleration_Y,Acceleration_Z,Rotation_X,Rotation_Y,Rotation_Z,Altitude,State,RollRateError,PID_Output,Servo1,Servo2,FiredParachute\n");
+            dataFile.print("Time,Acceleration_X,Acceleration_Y,Acceleration_Z,Rotation_X,Rotation_Y,Rotation_Z,Altitude,State,RollRateError,PID_Output,Servo1,Servo2,Voltage,FiredParachute\n");
         }
 
         sensors_event_t a, g, temp;
@@ -379,6 +390,8 @@ void dataLog() {
         dataFile.print(servoSetOne.read());
         dataFile.print(",");
         dataFile.print(servoSetTwo.read());
+        dataFile.print(",");
+        dataFile.print(analogRead(analogPin) * referenceVoltage) / adcResolution);
         dataFile.print(",");
         dataFile.print(firedParachute);
         dataFile.println();
